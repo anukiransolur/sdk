@@ -3,6 +3,7 @@ import type { TailorTypePermission, TailorTypeGqlPermission } from "@/configure/
 import type { ValueOperand } from "@/parser/service/auth/types";
 
 export type { RelationType } from "./relation";
+export type { TypeSourceInfo } from "./type-parser";
 export type {
   TailorAnyDBField,
   TailorDBField,
