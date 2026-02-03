@@ -138,7 +138,7 @@ export interface Namespace {
       draft: string;
       status: "RUNNING" | "REWORK" | "APPROVED" | "REJECTED" | "CANCELED";
       reworkIteration: number;
-      currentStepNo: number;
+      currentStepNo: Generated<number>;
       templateKey: string;
       templateVersion: number;
       requestedBy: string;

@@ -201,6 +201,43 @@ export function generateLinesDbSchemaFileWithEmbeddedType(
 }
 
 /**
+ * Extract the original function from a hook/validate expression.
+ * The expr format is: `(originalFunction)({ value: _value, data: _data, user: ... })`
+ * This extracts just the `originalFunction` part.
+ * @param expr - The expression string from hooks or validate
+ * @returns The extracted function string, or null if extraction fails
+ */
+function extractFunctionFromExpr(expr: string): string | null {
+  // The expr starts with `(` and we need to find the matching `)`
+  // that ends the function definition (before the invocation arguments)
+  if (!expr.startsWith("(")) {
+    return null;
+  }
+
+  let depth = 0;
+  let endIndex = -1;
+
+  for (let i = 0; i < expr.length; i++) {
+    if (expr[i] === "(") {
+      depth++;
+    } else if (expr[i] === ")") {
+      depth--;
+      if (depth === 0) {
+        endIndex = i;
+        break;
+      }
+    }
+  }
+
+  if (endIndex === -1) {
+    return null;
+  }
+
+  // Extract the function (without the outer parentheses)
+  return expr.slice(1, endIndex);
+}
+
+/**
  * Convert a field type to its db.* method call string.
  * @param fieldConfig - Field configuration
  * @returns db.* method call string (e.g., "db.string()", "db.uuid({ optional: true })")
@@ -308,11 +345,119 @@ function fieldConfigToDbCall(fieldConfig: OperatorFieldConfig): string {
     modifiers.push(`.serial({ ${serialOpts.join(", ")} })`);
   }
 
-  // Note: hooks and validate are CEL expressions executed server-side,
-  // so they cannot be represented in generated TypeScript code.
-  // These are intentionally skipped as they don't affect seed data validation.
+  // hooks: extract the original function from the expr
+  if (fieldConfig.hooks) {
+    const hookEntries: string[] = [];
+    if (fieldConfig.hooks.create?.expr) {
+      const fn = extractFunctionFromExpr(fieldConfig.hooks.create.expr);
+      if (fn) {
+        hookEntries.push(`create: ${fn}`);
+      }
+    }
+    if (fieldConfig.hooks.update?.expr) {
+      const fn = extractFunctionFromExpr(fieldConfig.hooks.update.expr);
+      if (fn) {
+        hookEntries.push(`update: ${fn}`);
+      }
+    }
+    if (hookEntries.length > 0) {
+      modifiers.push(`.hooks({ ${hookEntries.join(", ")} })`);
+    }
+  }
+
+  // validate: extract the original function from the expr
+  if (fieldConfig.validate && fieldConfig.validate.length > 0) {
+    const validateArgs = fieldConfig.validate
+      .map((v) => {
+        const fn = extractFunctionFromExpr(v.script.expr);
+        if (fn) {
+          return `[${fn}, "${v.errorMessage.replace(/"/g, '\\"')}"]`;
+        }
+        return null;
+      })
+      .filter(Boolean);
+    if (validateArgs.length > 0) {
+      modifiers.push(`.validate(${validateArgs.join(", ")})`);
+    }
+  }
 
   return baseCall + modifiers.join("");
+}
+
+/**
+ * Convert a standard permission operand back to user format.
+ * @param operand - Standard permission operand
+ * @returns User format operand string
+ */
+function operandToString(operand: unknown): string {
+  if (typeof operand === "object" && operand !== null) {
+    if ("user" in operand) {
+      const userKey = (operand as { user: string }).user;
+      // Convert _id back to id
+      const key = userKey === "_id" ? "id" : userKey;
+      return `{ user: "${key}" }`;
+    }
+    if ("value" in operand) {
+      const val = (operand as { value: unknown }).value;
+      return `{ value: ${JSON.stringify(val)} }`;
+    }
+    if ("record" in operand) {
+      return `{ record: "${(operand as { record: string }).record}" }`;
+    }
+  }
+  // Literal value
+  return JSON.stringify(operand);
+}
+
+/**
+ * Convert standard operator back to user format.
+ * @param op - Standard operator (eq, ne, in, nin)
+ * @returns User format operator
+ */
+function operatorToString(op: string): string {
+  const map: Record<string, string> = {
+    eq: "=",
+    ne: "!=",
+    in: "in",
+    nin: "not in",
+  };
+  return map[op] || op;
+}
+
+/**
+ * Generate gqlPermission chain method call.
+ * @param gql - Standard GQL permissions
+ * @returns gqlPermission method call string
+ */
+function generateGqlPermissionCall(
+  gql: { conditions: unknown[]; actions: unknown[]; permit: string; description?: string }[],
+): string {
+  const policies = gql.map((policy) => {
+    const parts: string[] = [];
+
+    // conditions
+    const conditions = (policy.conditions as unknown[][]).map((cond) => {
+      const [left, op, right] = cond;
+      return `[${operandToString(left)}, "${operatorToString(op as string)}", ${operandToString(right)}]`;
+    });
+    parts.push(`conditions: [${conditions.join(", ")}]`);
+
+    // actions
+    const actions = policy.actions as string[];
+    parts.push(`actions: [${actions.map((a) => `"${a}"`).join(", ")}]`);
+
+    // permit (convert "allow"/"deny" back to boolean)
+    parts.push(`permit: ${policy.permit === "allow"}`);
+
+    // description (optional)
+    if (policy.description) {
+      parts.push(`description: "${policy.description.replace(/"/g, '\\"')}"`);
+    }
+
+    return `{ ${parts.join(", ")} }`;
+  });
+
+  return `.gqlPermission([${policies.join(", ")}])`;
 }
 
 /**
@@ -343,5 +488,20 @@ export function generatePluginTypeDefinition(type: ParsedTailorDBType): string {
     ? `${nonTimestampFields}\n  ...db.fields.timestamps(),`
     : fieldEntries;
 
-  return `const ${type.name} = db.type("${type.name}", {\n${fieldsContent}\n});`;
+  // Build type definition with optional method chains
+  let result = `const ${type.name} = db.type("${type.name}", {\n${fieldsContent}\n})`;
+
+  // Add gqlPermission if defined
+  if (type.permissions.gql && type.permissions.gql.length > 0) {
+    result += generateGqlPermissionCall(
+      type.permissions.gql as unknown as {
+        conditions: unknown[];
+        actions: unknown[];
+        permit: string;
+        description?: string;
+      }[],
+    );
+  }
+
+  return `${result};`;
 }
