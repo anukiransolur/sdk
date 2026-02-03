@@ -425,6 +425,60 @@ function operatorToString(op: string): string {
 }
 
 /**
+ * Generate permission chain method call.
+ * @param record - Standard record permissions
+ * @param record.create
+ * @param record.read
+ * @param record.update
+ * @param record.delete
+ * @returns permission method call string
+ */
+function generatePermissionCall(record: {
+  create?: readonly unknown[];
+  read?: readonly unknown[];
+  update?: readonly unknown[];
+  delete?: readonly unknown[];
+}): string {
+  const actions: string[] = [];
+
+  for (const action of ["create", "read", "update", "delete"] as const) {
+    const permissions = record[action];
+    if (permissions && permissions.length > 0) {
+      const permissionStrs = (permissions as unknown[]).map((p) => {
+        const perm = p as {
+          conditions: unknown[];
+          permit: string;
+          description?: string;
+        };
+        const conditions = (perm.conditions as unknown[][]).map((cond) => {
+          const [left, op, right] = cond;
+          return `[${operandToString(left)}, "${operatorToString(op as string)}", ${operandToString(right)}]`;
+        });
+
+        if (perm.description || perm.permit === "deny") {
+          const parts: string[] = [];
+          parts.push(`conditions: [${conditions.join(", ")}]`);
+          parts.push(`permit: ${perm.permit === "allow"}`);
+          if (perm.description) {
+            parts.push(`description: "${perm.description.replace(/"/g, '\\"')}"`);
+          }
+          return `{ ${parts.join(", ")} }`;
+        }
+
+        // Simple format: just the condition
+        if (conditions.length === 1) {
+          return conditions[0];
+        }
+        return `[${conditions.join(", ")}]`;
+      });
+      actions.push(`${action}: [${permissionStrs.join(", ")}]`);
+    }
+  }
+
+  return `.permission({ ${actions.join(", ")} })`;
+}
+
+/**
  * Generate gqlPermission chain method call.
  * @param gql - Standard GQL permissions
  * @returns gqlPermission method call string
@@ -490,6 +544,30 @@ export function generatePluginTypeDefinition(type: ParsedTailorDBType): string {
 
   // Build type definition with optional method chains
   let result = `const ${type.name} = db.type("${type.name}", {\n${fieldsContent}\n})`;
+
+  // Add description if defined
+  if (type.description) {
+    result += `.description("${type.description.replace(/"/g, '\\"')}")`;
+  }
+
+  // Add indexes if defined
+  if (type.indexes && Object.keys(type.indexes).length > 0) {
+    const indexDefs = Object.entries(type.indexes).map(([name, def]) => {
+      const parts: string[] = [];
+      parts.push(`fields: [${def.fields.map((f) => `"${f}"`).join(", ")}]`);
+      if (def.unique) {
+        parts.push(`unique: true`);
+      }
+      parts.push(`name: "${name}"`);
+      return `{ ${parts.join(", ")} }`;
+    });
+    result += `.indexes(${indexDefs.join(", ")})`;
+  }
+
+  // Add permission if defined
+  if (type.permissions.record) {
+    result += generatePermissionCall(type.permissions.record);
+  }
 
   // Add gqlPermission if defined
   if (type.permissions.gql && type.permissions.gql.length > 0) {
