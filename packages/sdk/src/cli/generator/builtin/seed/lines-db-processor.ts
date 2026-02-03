@@ -275,7 +275,7 @@ function fieldConfigToDbCall(fieldConfig: OperatorFieldConfig): string {
       baseCall = options ? `db.string(${options})` : "db.string()";
   }
 
-  // Apply chain modifiers (index, unique, description, foreignKey)
+  // Apply chain modifiers
   const modifiers: string[] = [];
 
   if (fieldConfig.description) {
@@ -290,9 +290,27 @@ function fieldConfigToDbCall(fieldConfig: OperatorFieldConfig): string {
     modifiers.push(".unique()");
   }
 
-  if (fieldConfig.foreignKey && fieldConfig.foreignKeyType) {
-    modifiers.push(`.foreignKey("${fieldConfig.foreignKeyType}")`);
+  // vector is only valid for non-array string fields
+  if (fieldConfig.vector && fieldConfig.type === "string" && !fieldConfig.array) {
+    modifiers.push(".vector()");
   }
+
+  // serial configuration for integer or string fields
+  if (fieldConfig.serial) {
+    const serialOpts: string[] = [];
+    serialOpts.push(`start: ${fieldConfig.serial.start}`);
+    if (fieldConfig.serial.maxValue !== undefined) {
+      serialOpts.push(`maxValue: ${fieldConfig.serial.maxValue}`);
+    }
+    if (fieldConfig.serial.format !== undefined) {
+      serialOpts.push(`format: "${fieldConfig.serial.format.replace(/"/g, '\\"')}"`);
+    }
+    modifiers.push(`.serial({ ${serialOpts.join(", ")} })`);
+  }
+
+  // Note: hooks and validate are CEL expressions executed server-side,
+  // so they cannot be represented in generated TypeScript code.
+  // These are intentionally skipped as they don't affect seed data validation.
 
   return baseCall + modifiers.join("");
 }
