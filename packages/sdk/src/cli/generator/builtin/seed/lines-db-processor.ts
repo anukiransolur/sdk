@@ -542,12 +542,40 @@ export function generatePluginTypeDefinition(type: ParsedTailorDBType): string {
     ? `${nonTimestampFields}\n  ...db.fields.timestamps(),`
     : fieldEntries;
 
+  // Build type name (with optional plural form)
+  const typeName =
+    type.pluralForm && type.pluralForm !== type.name
+      ? `["${type.name}", "${type.pluralForm}"]`
+      : `"${type.name}"`;
+
   // Build type definition with optional method chains
-  let result = `const ${type.name} = db.type("${type.name}", {\n${fieldsContent}\n})`;
+  let result = `const ${type.name} = db.type(${typeName}, {\n${fieldsContent}\n})`;
 
   // Add description if defined
   if (type.description) {
     result += `.description("${type.description.replace(/"/g, '\\"')}")`;
+  }
+
+  // Add files if defined
+  if (type.files && Object.keys(type.files).length > 0) {
+    const fileEntries = Object.entries(type.files)
+      .map(([key, desc]) => `${key}: "${desc.replace(/"/g, '\\"')}"`)
+      .join(", ");
+    result += `.files({ ${fileEntries} })`;
+  }
+
+  // Add features if defined (aggregation, bulkUpsert)
+  if (type.settings) {
+    const features: string[] = [];
+    if (type.settings.aggregation) {
+      features.push("aggregation: true");
+    }
+    if (type.settings.bulkUpsert) {
+      features.push("bulkUpsert: true");
+    }
+    if (features.length > 0) {
+      result += `.features({ ${features.join(", ")} })`;
+    }
   }
 
   // Add indexes if defined
