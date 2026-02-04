@@ -58,6 +58,7 @@ export interface Namespace {
         version: number;
       };
       archived: boolean | null;
+      ownerID: string | null;
       createdAt: Generated<Timestamp>;
       updatedAt: Timestamp | null;
     }
