@@ -209,15 +209,26 @@ export interface GroupedTypeMetadata {
 }
 
 /**
+ * Import information for user-defined types referenced by plugin-generated types
+ */
+export interface UserDefinedTypeImport {
+  typeName: string;
+  exportName: string;
+  importPath: string;
+}
+
+/**
  * Generates the schema file content for lines-db with multiple embedded type definitions
  * (for plugin-generated types with inter-type relations)
  * @param types - Array of type metadata with definitions, in dependency order
  * @param mainTypeName - The main type name for this schema file
+ * @param userDefinedImports - User-defined types to import (optional)
  * @returns Schema file contents
  */
 export function generateLinesDbSchemaFileWithMultipleTypes(
   types: GroupedTypeMetadata[],
   mainTypeName: string,
+  userDefinedImports?: UserDefinedTypeImport[],
 ): string {
   const mainType = types.find((t) => t.metadata.typeName === mainTypeName);
   if (!mainType) {
@@ -229,6 +240,20 @@ export function generateLinesDbSchemaFileWithMultipleTypes(
   // Generate all type definitions in dependency order
   const typeDefinitions = types.map((t) => t.typeDefinition).join("\n\n");
 
+  // Generate import statements for user-defined types
+  // Use alias when exportName differs from typeName
+  const userDefinedImportStatements =
+    userDefinedImports && userDefinedImports.length > 0
+      ? userDefinedImports
+          .map((imp) => {
+            if (imp.exportName !== imp.typeName) {
+              return `import { ${imp.exportName} as ${imp.typeName} } from "${imp.importPath}";`;
+            }
+            return `import { ${imp.exportName} } from "${imp.importPath}";`;
+          })
+          .join("\n")
+      : "";
+
   const schemaTypeCode = ml /* ts */ `
     const schemaType = t.object({
       ...${exportName}.pickFields(${JSON.stringify(optionalFields)}, { optional: true }),
@@ -238,10 +263,17 @@ export function generateLinesDbSchemaFileWithMultipleTypes(
 
   const schemaOptionsCode = generateSchemaOptions(foreignKeys, indexes);
 
+  const importSection = userDefinedImportStatements
+    ? `import { db, t } from "@tailor-platform/sdk";
+import { createTailorDBHook, createStandardSchema } from "@tailor-platform/sdk/test";
+import { defineSchema } from "@toiroakr/lines-db";
+${userDefinedImportStatements}`
+    : `import { db, t } from "@tailor-platform/sdk";
+import { createTailorDBHook, createStandardSchema } from "@tailor-platform/sdk/test";
+import { defineSchema } from "@toiroakr/lines-db";`;
+
   return ml /* ts */ `
-    import { db, t } from "@tailor-platform/sdk";
-    import { createTailorDBHook, createStandardSchema } from "@tailor-platform/sdk/test";
-    import { defineSchema } from "@toiroakr/lines-db";
+    ${importSection}
 
     ${typeDefinitions}
 
