@@ -120,6 +120,71 @@ createResolver({
 });
 ```
 
+## Custom Type Names
+
+### Using `typeName()` for nested objects
+
+When defining nested objects in input or output schemas, you can specify a custom GraphQL type name using the `typeName()` method. This is useful when you want to control the exact type name that appears in the GraphQL schema.
+
+```typescript
+createResolver({
+  name: "createProfile",
+  operation: "mutation",
+  input: {
+    profile: t
+      .object({
+        name: t.string(),
+        email: t.string(),
+      })
+      .typeName("ProfileInput"), // GraphQL type will be "ProfileInput"
+  },
+  body: (context) => context.input.profile,
+  output: t
+    .object({
+      name: t.string(),
+      email: t.string(),
+    })
+    .typeName("ProfileOutput"), // GraphQL type will be "ProfileOutput"
+});
+```
+
+Without `typeName()`, the SDK generates type names automatically (e.g., `CreateProfileProfile` for input).
+
+### Using `toResolverOutput()` for TailorDB types
+
+When you want a resolver's output type to match a TailorDB type exactly, use the `toResolverOutput()` function. This ensures the GraphQL type name and all field types (including nested objects, files, relations, and backward relations) match the TailorDB introspection.
+
+```typescript
+import { createResolver, t, toResolverOutput } from "@tailor-platform/sdk";
+import { user } from "../tailordb/user";
+
+export default createResolver({
+  name: "getUser",
+  operation: "query",
+  input: {
+    id: t.uuid(),
+  },
+  body: async (context) => {
+    const db = getDB("tailordb");
+    return await db
+      .selectFrom("User")
+      .selectAll()
+      .where("id", "=", context.input.id)
+      .executeTakeFirstOrThrow();
+  },
+  output: toResolverOutput(user), // Equivalent to: t.object(user.fields).typeName("User")
+});
+```
+
+`toResolverOutput(type)` is equivalent to `t.object(type.fields).typeName(type.name)`, but provides a cleaner API and ensures consistency with TailorDB types.
+
+**Benefits of `toResolverOutput()`:**
+
+- Ensures GraphQL type name matches TailorDB type name
+- Nested object field types match (e.g., `UserInfo` → `UserUserInfo`)
+- File fields have correct `File` type
+- Relation and backward relation fields are properly typed
+
 ## Input Validation
 
 Add validation rules to input fields using the `validate` method:
