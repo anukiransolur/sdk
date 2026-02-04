@@ -1,5 +1,11 @@
 # @tailor-platform/sdk
 
+## 1.9.1
+
+### Patch Changes
+
+- [#527](https://github.com/tailor-platform/sdk/pull/527) [`78b07f8`](https://github.com/tailor-platform/sdk/commit/78b07f8be371850b5c2d28d12459e07b5d17eaaf) Thanks [@riku99](https://github.com/riku99)! - Add tests for loadWorkspaceId in context
+
 ## 1.9.0
 
 ### Minor Changes
