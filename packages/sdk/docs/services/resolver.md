@@ -152,7 +152,7 @@ Without `typeName()`, the SDK generates type names automatically (e.g., `CreateP
 
 ### Using `toResolverOutput()` for TailorDB types
 
-When you want a resolver's output type to match a TailorDB type exactly, use the `toResolverOutput()` function. This ensures the GraphQL type name and all field types (including nested objects, files, relations, and backward relations) match the TailorDB introspection.
+`toResolverOutput()` makes the resolver's output type match the TailorDB auto-generated query's return type. For example, if you have a `User` type in TailorDB, `toResolverOutput(user)` produces the same GraphQL type as the auto-generated `user` and `users` queries.
 
 ```typescript
 import { createResolver, t, toResolverOutput } from "@tailor-platform/sdk";
@@ -172,18 +172,9 @@ export default createResolver({
       .where("id", "=", context.input.id)
       .executeTakeFirstOrThrow();
   },
-  output: toResolverOutput(user), // Equivalent to: t.object(user.fields).typeName("User")
+  output: toResolverOutput(user), // Same type as TailorDB's `user` query returns
 });
 ```
-
-`toResolverOutput(type)` is equivalent to `t.object(type.fields).typeName(type.name)`, but provides a cleaner API and ensures consistency with TailorDB types.
-
-**Benefits of `toResolverOutput()`:**
-
-- Ensures GraphQL type name matches TailorDB type name
-- Nested object field types match (e.g., `UserInfo` → `UserUserInfo`)
-- File fields have correct `File` type
-- Relation and backward relation fields are properly typed
 
 ## Input Validation
 
