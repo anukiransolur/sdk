@@ -1,6 +1,6 @@
 import { db } from "@tailor-platform/sdk";
 import { nestedProfile } from "./nested";
-import { defaultGqlPermission, defaultPermission } from "./permissions";
+import { defaultPermission } from "./permissions";
 
 // Test type for backward relation testing
 // n-1 relation to NestedProfile (creates backward relation on NestedProfile)
@@ -17,8 +17,7 @@ export const profileComment = db
       .description("Referenced profile"),
     ...db.fields.timestamps(),
   })
-  .permission(defaultPermission)
-  .gqlPermission(defaultGqlPermission);
+  .permission(defaultPermission);
 
 // 1-1 relation to NestedProfile (creates backward relation on NestedProfile)
 export const profileDetail = db
@@ -34,5 +33,4 @@ export const profileDetail = db
       .description("Referenced profile"),
     ...db.fields.timestamps(),
   })
-  .permission(defaultPermission)
-  .gqlPermission(defaultGqlPermission);
+  .permission(defaultPermission);
