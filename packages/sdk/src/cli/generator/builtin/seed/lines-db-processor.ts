@@ -201,6 +201,62 @@ export function generateLinesDbSchemaFileWithEmbeddedType(
 }
 
 /**
+ * Metadata for a type in a grouped schema file
+ */
+export interface GroupedTypeMetadata {
+  metadata: LinesDbMetadata;
+  typeDefinition: string;
+}
+
+/**
+ * Generates the schema file content for lines-db with multiple embedded type definitions
+ * (for plugin-generated types with inter-type relations)
+ * @param types - Array of type metadata with definitions, in dependency order
+ * @param mainTypeName - The main type name for this schema file
+ * @returns Schema file contents
+ */
+export function generateLinesDbSchemaFileWithMultipleTypes(
+  types: GroupedTypeMetadata[],
+  mainTypeName: string,
+): string {
+  const mainType = types.find((t) => t.metadata.typeName === mainTypeName);
+  if (!mainType) {
+    throw new Error(`Main type ${mainTypeName} not found in types`);
+  }
+
+  const { exportName, optionalFields, omitFields, foreignKeys, indexes } = mainType.metadata;
+
+  // Generate all type definitions in dependency order
+  const typeDefinitions = types.map((t) => t.typeDefinition).join("\n\n");
+
+  const schemaTypeCode = ml /* ts */ `
+    const schemaType = t.object({
+      ...${exportName}.pickFields(${JSON.stringify(optionalFields)}, { optional: true }),
+      ...${exportName}.omitFields(${JSON.stringify([...optionalFields, ...omitFields])}),
+    });
+    `;
+
+  const schemaOptionsCode = generateSchemaOptions(foreignKeys, indexes);
+
+  return ml /* ts */ `
+    import { db, t } from "@tailor-platform/sdk";
+    import { createTailorDBHook, createStandardSchema } from "@tailor-platform/sdk/test";
+    import { defineSchema } from "@toiroakr/lines-db";
+
+    ${typeDefinitions}
+
+    ${schemaTypeCode}
+
+    const hook = createTailorDBHook(${exportName});
+
+    export const schema = defineSchema(
+      createStandardSchema(schemaType, hook),${schemaOptionsCode}
+    );
+
+    `;
+}
+
+/**
  * Extract the original function from a hook/validate expression.
  * The expr format is: `(originalFunction)({ value: _value, data: _data, user: ... })`
  * This extracts just the `originalFunction` part.
@@ -379,6 +435,38 @@ function fieldConfigToDbCall(fieldConfig: OperatorFieldConfig): string {
     if (validateArgs.length > 0) {
       modifiers.push(`.validate(${validateArgs.join(", ")})`);
     }
+  }
+
+  // relation: output relation configuration
+  if (fieldConfig.rawRelation) {
+    const rel = fieldConfig.rawRelation;
+    const parts: string[] = [];
+
+    // relation type (n-1, 1-1, 1-n, n-n)
+    parts.push(`type: "${rel.type}"`);
+
+    // toward configuration
+    const towardParts: string[] = [];
+    if (rel.toward.type === "self") {
+      towardParts.push(`type: "self"`);
+    } else {
+      // Reference to another type (variable name)
+      towardParts.push(`type: ${rel.toward.type}`);
+    }
+    if (rel.toward.as) {
+      towardParts.push(`as: "${rel.toward.as}"`);
+    }
+    if (rel.toward.key) {
+      towardParts.push(`key: "${rel.toward.key}"`);
+    }
+    parts.push(`toward: { ${towardParts.join(", ")} }`);
+
+    // backward name (optional)
+    if (rel.backward) {
+      parts.push(`backward: "${rel.backward}"`);
+    }
+
+    modifiers.push(`.relation({ ${parts.join(", ")} })`);
   }
 
   return baseCall + modifiers.join("");
