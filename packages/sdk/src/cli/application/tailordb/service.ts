@@ -21,6 +21,7 @@ export type TailorDBService = {
   getPluginAttachments: () => ReadonlyMap<string, readonly PluginAttachment[]>;
   setPluginManager: (manager: PluginManager) => void;
   loadTypes: () => Promise<Record<string, ParsedTailorDBType> | undefined>;
+  processStandalonePlugins: () => Promise<void>;
 };
 
 /**
@@ -268,6 +269,54 @@ export function createTailorDBService(
     return loadedTypes;
   };
 
+  /**
+   * Process standalone plugins and register their generated types.
+   * This method is called after loadTypes() to process plugins that
+   * generate types without requiring a source type.
+   */
+  const processStandalonePlugins = async (): Promise<void> => {
+    if (!pluginManager) return;
+
+    const results = await pluginManager.processStandalonePlugins(namespace);
+
+    for (const { pluginId, result } of results) {
+      if (!result.success) {
+        logger.error(result.error);
+        throw new Error(result.error);
+      }
+
+      const output = result.output;
+
+      // Add generated types to rawTypes
+      // Use a special key for standalone plugin-generated types
+      const standaloneKey = `__standalone_plugin_${pluginId}__`;
+      if (!rawTypes[standaloneKey]) {
+        rawTypes[standaloneKey] = {};
+      }
+
+      for (const generatedType of output.types ?? []) {
+        rawTypes[standaloneKey][generatedType.name] = generatedType as TailorDBType;
+        // Plugin-generated types don't have a source file.
+        typeSourceInfo[generatedType.name] = {
+          filePath: "",
+          exportName: generatedType.name,
+          pluginId,
+          originalFilePath: "",
+          originalExportName: "",
+        };
+
+        logger.log(
+          `  Generated: ${styles.success(generatedType.name)} by standalone plugin ${styles.info(pluginId)}`,
+        );
+      }
+    }
+
+    // Re-parse types to include standalone plugin-generated types
+    if (results.some((r) => r.result.success && (r.result.output.types?.length ?? 0) > 0)) {
+      doParseTypes();
+    }
+  };
+
   return {
     namespace,
     config,
@@ -297,5 +346,6 @@ export function createTailorDBService(
       doParseTypes();
       return types;
     },
+    processStandalonePlugins,
   };
 }

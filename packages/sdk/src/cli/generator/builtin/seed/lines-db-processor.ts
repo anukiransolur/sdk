@@ -71,14 +71,14 @@ export function processLinesDb(
   }
 
   // Build plugin source info if this is a plugin-generated type
-  const pluginSource: PluginSourceInfo | undefined =
-    source.pluginId && source.originalFilePath && source.originalExportName
-      ? {
-          pluginId: source.pluginId,
-          originalFilePath: source.originalFilePath,
-          originalExportName: source.originalExportName,
-        }
-      : undefined;
+  // For standalone plugins (no originalFilePath), we still need to mark it as plugin-generated
+  const pluginSource: PluginSourceInfo | undefined = source.pluginId
+    ? {
+        pluginId: source.pluginId,
+        originalFilePath: source.originalFilePath || "",
+        originalExportName: source.originalExportName || "",
+      }
+    : undefined;
 
   return {
     typeName: type.name,
