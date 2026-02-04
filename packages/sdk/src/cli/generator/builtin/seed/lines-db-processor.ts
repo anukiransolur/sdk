@@ -227,7 +227,7 @@ export function generateLinesDbSchemaFileWithPluginAPI(
     `;
   }
 
-  // Standalone plugin (e.g., audit-log): use getGeneratedType(kind)
+  // Standalone plugin (e.g., audit-log): use getGeneratedType(null, kind)
   // For standalone plugins, generatedTypeKind is required
   if (!pluginImport.generatedTypeKind) {
     throw new Error(
@@ -241,7 +241,7 @@ export function generateLinesDbSchemaFileWithPluginAPI(
     import { defineSchema } from "@toiroakr/lines-db";
     import { getGeneratedType } from "${pluginImportPath}";
 
-    const ${exportName} = getGeneratedType("${pluginImport.generatedTypeKind}");
+    const ${exportName} = getGeneratedType(null, "${pluginImport.generatedTypeKind}");
 
     ${schemaTypeCode}
 
