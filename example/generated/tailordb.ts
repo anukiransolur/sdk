@@ -63,6 +63,22 @@ export interface Namespace {
       updatedAt: Timestamp | null;
     }
 
+    ProfileComment: {
+      id: Generated<string>;
+      content: string;
+      profileID: string;
+      createdAt: Generated<Timestamp>;
+      updatedAt: Timestamp | null;
+    }
+
+    ProfileDetail: {
+      id: Generated<string>;
+      bio: string | null;
+      profileID: string;
+      createdAt: Generated<Timestamp>;
+      updatedAt: Timestamp | null;
+    }
+
     PurchaseOrder: {
       id: Generated<string>;
       supplierID: string;
