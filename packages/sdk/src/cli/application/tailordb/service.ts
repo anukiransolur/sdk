@@ -211,6 +211,8 @@ export function createTailorDBService(
           filePath: "",
           exportName: generatedType.name,
           pluginId: attachment.pluginId,
+          // Get import path from plugin definition
+          pluginImportPath: pluginManager?.getPluginImportPath(attachment.pluginId),
           originalFilePath: sourceFilePath,
           originalExportName: originalTypeInfo?.exportName ?? rawType.name,
           // Get kind from plugin output (plugins define their own kind mapping)
@@ -305,8 +307,12 @@ export function createTailorDBService(
           filePath: "",
           exportName: generatedType.name,
           pluginId,
+          // Get import path from plugin definition
+          pluginImportPath: pluginManager.getPluginImportPath(pluginId),
           originalFilePath: "",
           originalExportName: "",
+          // Get kind from plugin output (plugins define their own kind mapping)
+          generatedTypeKind: (generatedType as PluginGeneratedType).kind,
         };
 
         logger.log(

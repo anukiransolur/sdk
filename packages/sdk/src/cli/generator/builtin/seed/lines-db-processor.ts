@@ -75,6 +75,7 @@ export function processLinesDb(
   const pluginSource: PluginSourceInfo | undefined = source.pluginId
     ? {
         pluginId: source.pluginId,
+        pluginImportPath: source.pluginImportPath,
         originalFilePath: source.originalFilePath || "",
         originalExportName: source.originalExportName || "",
         generatedTypeKind: source.generatedTypeKind,
@@ -167,25 +168,14 @@ export function generateLinesDbSchemaFile(metadata: LinesDbMetadata, importPath:
 export interface PluginTypeImport {
   /** Plugin ID (e.g., "@tailor-platform/changeset") */
   pluginId: string;
+  /** Plugin import path (e.g., "@tailor-platform/sdk/changeset-plugin") */
+  pluginImportPath: string;
   /** Original type's export name (for type-attached plugins) */
   originalExportName?: string;
   /** Original type's import path (for type-attached plugins) */
   originalImportPath?: string;
   /** Generated type kind (for type-attached plugins, e.g., "request", "step") */
   generatedTypeKind?: string;
-}
-
-/**
- * Get the plugin import path from plugin ID.
- * @param pluginId - Plugin ID (e.g., "@tailor-platform/changeset")
- * @returns Import path for the plugin
- */
-function getPluginImportPath(pluginId: string): string {
-  const pluginImportMap: Record<string, string> = {
-    "@tailor-platform/changeset": "@tailor-platform/sdk/changeset-plugin",
-    "@tailor-platform/audit-log": "@tailor-platform/sdk/audit-log-plugin",
-  };
-  return pluginImportMap[pluginId] || pluginId;
 }
 
 /**
@@ -200,7 +190,7 @@ export function generateLinesDbSchemaFileWithPluginAPI(
   pluginImport: PluginTypeImport,
 ): string {
   const { typeName, exportName, optionalFields, omitFields, foreignKeys, indexes } = metadata;
-  const pluginImportPath = getPluginImportPath(pluginImport.pluginId);
+  const { pluginImportPath } = pluginImport;
 
   const schemaTypeCode = ml /* ts */ `
     const schemaType = t.object({
@@ -237,14 +227,21 @@ export function generateLinesDbSchemaFileWithPluginAPI(
     `;
   }
 
-  // Standalone plugin (e.g., audit-log): use getGeneratedType(typeName)
+  // Standalone plugin (e.g., audit-log): use getGeneratedType(kind)
+  // For standalone plugins, generatedTypeKind is required
+  if (!pluginImport.generatedTypeKind) {
+    throw new Error(
+      `Standalone plugin "${pluginImport.pluginId}" must provide generatedTypeKind for type "${typeName}"`,
+    );
+  }
+
   return ml /* ts */ `
     import { t } from "@tailor-platform/sdk";
     import { createTailorDBHook, createStandardSchema } from "@tailor-platform/sdk/test";
     import { defineSchema } from "@toiroakr/lines-db";
     import { getGeneratedType } from "${pluginImportPath}";
 
-    const ${exportName} = getGeneratedType("${typeName}");
+    const ${exportName} = getGeneratedType("${pluginImport.generatedTypeKind}");
 
     ${schemaTypeCode}
 
