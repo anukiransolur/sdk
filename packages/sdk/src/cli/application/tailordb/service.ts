@@ -10,36 +10,8 @@ import {
   type TypeSourceInfo,
 } from "@/parser/service/tailordb";
 import type { TailorDBServiceConfig } from "@/configure/services/tailordb/types";
-import type { PluginAttachment } from "@/parser/plugin-config/types";
+import type { PluginAttachment, PluginGeneratedType } from "@/parser/plugin-config/types";
 import type { PluginManager } from "@/plugin/manager";
-
-/**
- * Derive the generated type kind for plugin-generated types.
- * Used by seed generator to generate correct getGeneratedType() calls.
- * @param generatedTypeName - Name of the generated type (e.g., "UserChangeRequest")
- * @param originalTypeName - Name of the original type (e.g., "User")
- * @param pluginId - Plugin ID that generated the type
- * @returns Generated type kind (e.g., "request") or undefined for standalone plugins
- */
-function deriveGeneratedTypeKind(
-  generatedTypeName: string,
-  originalTypeName: string,
-  pluginId: string,
-): string | undefined {
-  // Changeset plugin type patterns
-  if (pluginId === "@tailor-platform/changeset") {
-    const suffix = generatedTypeName.slice(originalTypeName.length);
-    const kindMap: Record<string, string> = {
-      ChangeRequest: "request",
-      ChangeStep: "step",
-      ChangeApproval: "approval",
-      ChangeReworkEvent: "rework",
-    };
-    return kindMap[suffix];
-  }
-  // Standalone plugins don't have a kind (use type name directly)
-  return undefined;
-}
 
 export type TailorDBService = {
   readonly namespace: string;
@@ -241,11 +213,8 @@ export function createTailorDBService(
           pluginId: attachment.pluginId,
           originalFilePath: sourceFilePath,
           originalExportName: originalTypeInfo?.exportName ?? rawType.name,
-          generatedTypeKind: deriveGeneratedTypeKind(
-            generatedType.name,
-            rawType.name,
-            attachment.pluginId,
-          ),
+          // Get kind from plugin output (plugins define their own kind mapping)
+          generatedTypeKind: (generatedType as PluginGeneratedType).kind,
         };
 
         logger.log(
