@@ -13,6 +13,34 @@ import type { TailorDBServiceConfig } from "@/configure/services/tailordb/types"
 import type { PluginAttachment } from "@/parser/plugin-config/types";
 import type { PluginManager } from "@/plugin/manager";
 
+/**
+ * Derive the generated type kind for plugin-generated types.
+ * Used by seed generator to generate correct getGeneratedType() calls.
+ * @param generatedTypeName - Name of the generated type (e.g., "UserChangeRequest")
+ * @param originalTypeName - Name of the original type (e.g., "User")
+ * @param pluginId - Plugin ID that generated the type
+ * @returns Generated type kind (e.g., "request") or undefined for standalone plugins
+ */
+function deriveGeneratedTypeKind(
+  generatedTypeName: string,
+  originalTypeName: string,
+  pluginId: string,
+): string | undefined {
+  // Changeset plugin type patterns
+  if (pluginId === "@tailor-platform/changeset") {
+    const suffix = generatedTypeName.slice(originalTypeName.length);
+    const kindMap: Record<string, string> = {
+      ChangeRequest: "request",
+      ChangeStep: "step",
+      ChangeApproval: "approval",
+      ChangeReworkEvent: "rework",
+    };
+    return kindMap[suffix];
+  }
+  // Standalone plugins don't have a kind (use type name directly)
+  return undefined;
+}
+
 export type TailorDBService = {
   readonly namespace: string;
   readonly config: TailorDBServiceConfig;
@@ -205,12 +233,19 @@ export function createTailorDBService(
         rawTypes[sourceFilePath][generatedType.name] = generatedType as TailorDBType;
         // Plugin-generated types don't have a source file.
         // Generators that need to import these types should generate their own type files.
+        // Use the original type's export name from typeSourceInfo (set in loadTypeFile)
+        const originalTypeInfo = typeSourceInfo[rawType.name];
         typeSourceInfo[generatedType.name] = {
           filePath: "",
           exportName: generatedType.name,
           pluginId: attachment.pluginId,
           originalFilePath: sourceFilePath,
-          originalExportName: rawType.name,
+          originalExportName: originalTypeInfo?.exportName ?? rawType.name,
+          generatedTypeKind: deriveGeneratedTypeKind(
+            generatedType.name,
+            rawType.name,
+            attachment.pluginId,
+          ),
         };
 
         logger.log(

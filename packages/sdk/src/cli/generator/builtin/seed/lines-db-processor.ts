@@ -1,7 +1,7 @@
 import ml from "multiline-ts";
 import type { LinesDbMetadata, PluginSourceInfo } from "./types";
 import type { TypeSourceInfoEntry } from "@/cli/generator/types";
-import type { ParsedTailorDBType, OperatorFieldConfig } from "@/parser/service/tailordb/types";
+import type { ParsedTailorDBType } from "@/parser/service/tailordb/types";
 import type { ForeignKeyDefinition, IndexDefinition } from "@toiroakr/lines-db";
 
 /**
@@ -77,6 +77,7 @@ export function processLinesDb(
         pluginId: source.pluginId,
         originalFilePath: source.originalFilePath || "",
         originalExportName: source.originalExportName || "",
+        generatedTypeKind: source.generatedTypeKind,
       }
     : undefined;
 
@@ -161,17 +162,45 @@ export function generateLinesDbSchemaFile(metadata: LinesDbMetadata, importPath:
 }
 
 /**
- * Generates the schema file content for lines-db with embedded type definition
- * (for plugin-generated types that don't have a source file)
+ * Plugin import information for getGeneratedType API
+ */
+export interface PluginTypeImport {
+  /** Plugin ID (e.g., "@tailor-platform/changeset") */
+  pluginId: string;
+  /** Original type's export name (for type-attached plugins) */
+  originalExportName?: string;
+  /** Original type's import path (for type-attached plugins) */
+  originalImportPath?: string;
+  /** Generated type kind (for type-attached plugins, e.g., "request", "step") */
+  generatedTypeKind?: string;
+}
+
+/**
+ * Get the plugin import path from plugin ID.
+ * @param pluginId - Plugin ID (e.g., "@tailor-platform/changeset")
+ * @returns Import path for the plugin
+ */
+function getPluginImportPath(pluginId: string): string {
+  const pluginImportMap: Record<string, string> = {
+    "@tailor-platform/changeset": "@tailor-platform/sdk/changeset-plugin",
+    "@tailor-platform/audit-log": "@tailor-platform/sdk/audit-log-plugin",
+  };
+  return pluginImportMap[pluginId] || pluginId;
+}
+
+/**
+ * Generates the schema file content using getGeneratedType API
+ * (for plugin-generated types)
  * @param metadata - lines-db metadata
- * @param typeDefinition - Embedded type definition code
+ * @param pluginImport - Plugin import information
  * @returns Schema file contents
  */
-export function generateLinesDbSchemaFileWithEmbeddedType(
+export function generateLinesDbSchemaFileWithPluginAPI(
   metadata: LinesDbMetadata,
-  typeDefinition: string,
+  pluginImport: PluginTypeImport,
 ): string {
-  const { exportName, optionalFields, omitFields, foreignKeys, indexes } = metadata;
+  const { typeName, exportName, optionalFields, omitFields, foreignKeys, indexes } = metadata;
+  const pluginImportPath = getPluginImportPath(pluginImport.pluginId);
 
   const schemaTypeCode = ml /* ts */ `
     const schemaType = t.object({
@@ -182,12 +211,20 @@ export function generateLinesDbSchemaFileWithEmbeddedType(
 
   const schemaOptionsCode = generateSchemaOptions(foreignKeys, indexes);
 
-  return ml /* ts */ `
-    import { db, t } from "@tailor-platform/sdk";
+  // Type-attached plugin (e.g., changeset): import original type and use getGeneratedType(type, kind)
+  if (
+    pluginImport.originalExportName &&
+    pluginImport.originalImportPath &&
+    pluginImport.generatedTypeKind
+  ) {
+    return ml /* ts */ `
+    import { t } from "@tailor-platform/sdk";
     import { createTailorDBHook, createStandardSchema } from "@tailor-platform/sdk/test";
     import { defineSchema } from "@toiroakr/lines-db";
+    import { getGeneratedType } from "${pluginImportPath}";
+    import { ${pluginImport.originalExportName} } from "${pluginImport.originalImportPath}";
 
-    ${typeDefinition}
+    const ${exportName} = getGeneratedType(${pluginImport.originalExportName}, "${pluginImport.generatedTypeKind}");
 
     ${schemaTypeCode}
 
@@ -198,84 +235,16 @@ export function generateLinesDbSchemaFileWithEmbeddedType(
     );
 
     `;
-}
-
-/**
- * Metadata for a type in a grouped schema file
- */
-export interface GroupedTypeMetadata {
-  metadata: LinesDbMetadata;
-  typeDefinition: string;
-}
-
-/**
- * Import information for user-defined types referenced by plugin-generated types
- */
-export interface UserDefinedTypeImport {
-  typeName: string;
-  exportName: string;
-  importPath: string;
-}
-
-/**
- * Generates the schema file content for lines-db with multiple embedded type definitions
- * (for plugin-generated types with inter-type relations)
- * @param types - Array of type metadata with definitions, in dependency order
- * @param mainTypeName - The main type name for this schema file
- * @param userDefinedImports - User-defined types to import (optional)
- * @returns Schema file contents
- */
-export function generateLinesDbSchemaFileWithMultipleTypes(
-  types: GroupedTypeMetadata[],
-  mainTypeName: string,
-  userDefinedImports?: UserDefinedTypeImport[],
-): string {
-  const mainType = types.find((t) => t.metadata.typeName === mainTypeName);
-  if (!mainType) {
-    throw new Error(`Main type ${mainTypeName} not found in types`);
   }
 
-  const { exportName, optionalFields, omitFields, foreignKeys, indexes } = mainType.metadata;
-
-  // Generate all type definitions in dependency order
-  const typeDefinitions = types.map((t) => t.typeDefinition).join("\n\n");
-
-  // Generate import statements for user-defined types
-  // Use alias when exportName differs from typeName
-  const userDefinedImportStatements =
-    userDefinedImports && userDefinedImports.length > 0
-      ? userDefinedImports
-          .map((imp) => {
-            if (imp.exportName !== imp.typeName) {
-              return `import { ${imp.exportName} as ${imp.typeName} } from "${imp.importPath}";`;
-            }
-            return `import { ${imp.exportName} } from "${imp.importPath}";`;
-          })
-          .join("\n")
-      : "";
-
-  const schemaTypeCode = ml /* ts */ `
-    const schemaType = t.object({
-      ...${exportName}.pickFields(${JSON.stringify(optionalFields)}, { optional: true }),
-      ...${exportName}.omitFields(${JSON.stringify([...optionalFields, ...omitFields])}),
-    });
-    `;
-
-  const schemaOptionsCode = generateSchemaOptions(foreignKeys, indexes);
-
-  const importSection = userDefinedImportStatements
-    ? `import { db, t } from "@tailor-platform/sdk";
-import { createTailorDBHook, createStandardSchema } from "@tailor-platform/sdk/test";
-import { defineSchema } from "@toiroakr/lines-db";
-${userDefinedImportStatements}`
-    : `import { db, t } from "@tailor-platform/sdk";
-import { createTailorDBHook, createStandardSchema } from "@tailor-platform/sdk/test";
-import { defineSchema } from "@toiroakr/lines-db";`;
-
+  // Standalone plugin (e.g., audit-log): use getGeneratedType(typeName)
   return ml /* ts */ `
-    ${importSection}
+    import { t } from "@tailor-platform/sdk";
+    import { createTailorDBHook, createStandardSchema } from "@tailor-platform/sdk/test";
+    import { defineSchema } from "@toiroakr/lines-db";
+    import { getGeneratedType } from "${pluginImportPath}";
 
-    ${typeDefinitions}
+    const ${exportName} = getGeneratedType("${typeName}");
 
     ${schemaTypeCode}
 
@@ -286,449 +255,4 @@ import { defineSchema } from "@toiroakr/lines-db";`;
     );
 
     `;
-}
-
-/**
- * Extract the original function from a hook/validate expression.
- * The expr format is: `(originalFunction)({ value: _value, data: _data, user: ... })`
- * This extracts just the `originalFunction` part.
- * @param expr - The expression string from hooks or validate
- * @returns The extracted function string, or null if extraction fails
- */
-function extractFunctionFromExpr(expr: string): string | null {
-  // The expr starts with `(` and we need to find the matching `)`
-  // that ends the function definition (before the invocation arguments)
-  if (!expr.startsWith("(")) {
-    return null;
-  }
-
-  let depth = 0;
-  let endIndex = -1;
-
-  for (let i = 0; i < expr.length; i++) {
-    if (expr[i] === "(") {
-      depth++;
-    } else if (expr[i] === ")") {
-      depth--;
-      if (depth === 0) {
-        endIndex = i;
-        break;
-      }
-    }
-  }
-
-  if (endIndex === -1) {
-    return null;
-  }
-
-  // Extract the function (without the outer parentheses)
-  return expr.slice(1, endIndex);
-}
-
-/**
- * Convert a field type to its db.* method call string.
- * @param fieldConfig - Field configuration
- * @returns db.* method call string (e.g., "db.string()", "db.uuid({ optional: true })")
- */
-function fieldConfigToDbCall(fieldConfig: OperatorFieldConfig): string {
-  // Determine if the field is optional (not required means optional)
-  const isOptional = !fieldConfig.required;
-  const isArray = fieldConfig.array;
-
-  // Build options object for the db.* method call
-  const buildOptions = (): string => {
-    const opts: string[] = [];
-    if (isOptional) opts.push("optional: true");
-    if (isArray) opts.push("array: true");
-    return opts.length > 0 ? `{ ${opts.join(", ")} }` : "";
-  };
-
-  let baseCall: string;
-  const options = buildOptions();
-
-  // Map field type to db method
-  switch (fieldConfig.type) {
-    case "string":
-      baseCall = options ? `db.string(${options})` : "db.string()";
-      break;
-    case "uuid":
-      baseCall = options ? `db.uuid(${options})` : "db.uuid()";
-      break;
-    case "integer":
-      baseCall = options ? `db.int(${options})` : "db.int()";
-      break;
-    case "float":
-      baseCall = options ? `db.float(${options})` : "db.float()";
-      break;
-    case "boolean":
-      baseCall = options ? `db.bool(${options})` : "db.bool()";
-      break;
-    case "date":
-      baseCall = options ? `db.date(${options})` : "db.date()";
-      break;
-    case "datetime":
-      baseCall = options ? `db.datetime(${options})` : "db.datetime()";
-      break;
-    case "time":
-      baseCall = options ? `db.time(${options})` : "db.time()";
-      break;
-    case "enum":
-      if (fieldConfig.allowedValues && fieldConfig.allowedValues.length > 0) {
-        const values = fieldConfig.allowedValues.map((v) => {
-          if (v.description) {
-            return `{ value: "${v.value}", description: "${v.description}" }`;
-          }
-          return `"${v.value}"`;
-        });
-        baseCall = `db.enum([${values.join(", ")}]${options ? `, ${options}` : ""})`;
-      } else {
-        baseCall = `db.enum([]${options ? `, ${options}` : ""})`;
-      }
-      break;
-    case "nested":
-      if (fieldConfig.fields && Object.keys(fieldConfig.fields).length > 0) {
-        const nestedFields = Object.entries(fieldConfig.fields)
-          .map(([name, config]) => `    ${name}: ${fieldConfigToDbCall(config)},`)
-          .join("\n");
-        baseCall = `db.nested({\n${nestedFields}\n  }${options ? `, ${options}` : ""})`;
-      } else {
-        baseCall = `db.nested({}${options ? `, ${options}` : ""})`;
-      }
-      break;
-    default:
-      // For unknown types, use string as fallback
-      baseCall = options ? `db.string(${options})` : "db.string()";
-  }
-
-  // Apply chain modifiers
-  const modifiers: string[] = [];
-
-  if (fieldConfig.description) {
-    modifiers.push(`.description("${fieldConfig.description.replace(/"/g, '\\"')}")`);
-  }
-
-  if (fieldConfig.index) {
-    modifiers.push(".index()");
-  }
-
-  if (fieldConfig.unique) {
-    modifiers.push(".unique()");
-  }
-
-  // vector is only valid for non-array string fields
-  if (fieldConfig.vector && fieldConfig.type === "string" && !fieldConfig.array) {
-    modifiers.push(".vector()");
-  }
-
-  // serial configuration for integer or string fields
-  if (fieldConfig.serial) {
-    const serialOpts: string[] = [];
-    serialOpts.push(`start: ${fieldConfig.serial.start}`);
-    if (fieldConfig.serial.maxValue !== undefined) {
-      serialOpts.push(`maxValue: ${fieldConfig.serial.maxValue}`);
-    }
-    if (fieldConfig.serial.format !== undefined) {
-      serialOpts.push(`format: "${fieldConfig.serial.format.replace(/"/g, '\\"')}"`);
-    }
-    modifiers.push(`.serial({ ${serialOpts.join(", ")} })`);
-  }
-
-  // hooks: extract the original function from the expr
-  if (fieldConfig.hooks) {
-    const hookEntries: string[] = [];
-    if (fieldConfig.hooks.create?.expr) {
-      const fn = extractFunctionFromExpr(fieldConfig.hooks.create.expr);
-      if (fn) {
-        hookEntries.push(`create: ${fn}`);
-      }
-    }
-    if (fieldConfig.hooks.update?.expr) {
-      const fn = extractFunctionFromExpr(fieldConfig.hooks.update.expr);
-      if (fn) {
-        hookEntries.push(`update: ${fn}`);
-      }
-    }
-    if (hookEntries.length > 0) {
-      modifiers.push(`.hooks({ ${hookEntries.join(", ")} })`);
-    }
-  }
-
-  // validate: extract the original function from the expr
-  if (fieldConfig.validate && fieldConfig.validate.length > 0) {
-    const validateArgs = fieldConfig.validate
-      .map((v) => {
-        const fn = extractFunctionFromExpr(v.script.expr);
-        if (fn) {
-          return `[${fn}, "${v.errorMessage.replace(/"/g, '\\"')}"]`;
-        }
-        return null;
-      })
-      .filter(Boolean);
-    if (validateArgs.length > 0) {
-      modifiers.push(`.validate(${validateArgs.join(", ")})`);
-    }
-  }
-
-  // relation: output relation configuration
-  if (fieldConfig.rawRelation) {
-    const rel = fieldConfig.rawRelation;
-    const parts: string[] = [];
-
-    // relation type (n-1, 1-1, 1-n, n-n)
-    parts.push(`type: "${rel.type}"`);
-
-    // toward configuration
-    const towardParts: string[] = [];
-    if (rel.toward.type === "self") {
-      towardParts.push(`type: "self"`);
-    } else {
-      // Reference to another type (variable name)
-      towardParts.push(`type: ${rel.toward.type}`);
-    }
-    if (rel.toward.as) {
-      towardParts.push(`as: "${rel.toward.as}"`);
-    }
-    if (rel.toward.key) {
-      towardParts.push(`key: "${rel.toward.key}"`);
-    }
-    parts.push(`toward: { ${towardParts.join(", ")} }`);
-
-    // backward name (optional)
-    if (rel.backward) {
-      parts.push(`backward: "${rel.backward}"`);
-    }
-
-    modifiers.push(`.relation({ ${parts.join(", ")} })`);
-  }
-
-  return baseCall + modifiers.join("");
-}
-
-/**
- * Convert a standard permission operand back to user format.
- * @param operand - Standard permission operand
- * @returns User format operand string
- */
-function operandToString(operand: unknown): string {
-  if (typeof operand === "object" && operand !== null) {
-    if ("user" in operand) {
-      const userKey = (operand as { user: string }).user;
-      // Convert _id back to id
-      const key = userKey === "_id" ? "id" : userKey;
-      return `{ user: "${key}" }`;
-    }
-    if ("value" in operand) {
-      const val = (operand as { value: unknown }).value;
-      return `{ value: ${JSON.stringify(val)} }`;
-    }
-    if ("record" in operand) {
-      return `{ record: "${(operand as { record: string }).record}" }`;
-    }
-  }
-  // Literal value
-  return JSON.stringify(operand);
-}
-
-/**
- * Convert standard operator back to user format.
- * @param op - Standard operator (eq, ne, in, nin)
- * @returns User format operator
- */
-function operatorToString(op: string): string {
-  const map: Record<string, string> = {
-    eq: "=",
-    ne: "!=",
-    in: "in",
-    nin: "not in",
-  };
-  return map[op] || op;
-}
-
-/**
- * Record permission configuration
- */
-interface RecordPermissions {
-  create?: readonly unknown[];
-  read?: readonly unknown[];
-  update?: readonly unknown[];
-  delete?: readonly unknown[];
-}
-
-/**
- * Generate permission chain method call.
- * @param record - Standard record permissions with CRUD operations
- * @returns permission method call string
- */
-function generatePermissionCall(record: RecordPermissions): string {
-  const actions: string[] = [];
-
-  for (const action of ["create", "read", "update", "delete"] as const) {
-    const permissions = record[action];
-    if (permissions && permissions.length > 0) {
-      const permissionStrs = (permissions as unknown[]).map((p) => {
-        const perm = p as {
-          conditions: unknown[];
-          permit: string;
-          description?: string;
-        };
-        const conditions = (perm.conditions as unknown[][]).map((cond) => {
-          const [left, op, right] = cond;
-          return `[${operandToString(left)}, "${operatorToString(op as string)}", ${operandToString(right)}]`;
-        });
-
-        if (perm.description || perm.permit === "deny") {
-          const parts: string[] = [];
-          parts.push(`conditions: [${conditions.join(", ")}]`);
-          parts.push(`permit: ${perm.permit === "allow"}`);
-          if (perm.description) {
-            parts.push(`description: "${perm.description.replace(/"/g, '\\"')}"`);
-          }
-          return `{ ${parts.join(", ")} }`;
-        }
-
-        // Simple format: just the condition
-        if (conditions.length === 1) {
-          return conditions[0];
-        }
-        return `[${conditions.join(", ")}]`;
-      });
-      actions.push(`${action}: [${permissionStrs.join(", ")}]`);
-    }
-  }
-
-  return `.permission({ ${actions.join(", ")} })`;
-}
-
-/**
- * Generate gqlPermission chain method call.
- * @param gql - Standard GQL permissions
- * @returns gqlPermission method call string
- */
-function generateGqlPermissionCall(
-  gql: { conditions: unknown[]; actions: unknown[]; permit: string; description?: string }[],
-): string {
-  const policies = gql.map((policy) => {
-    const parts: string[] = [];
-
-    // conditions
-    const conditions = (policy.conditions as unknown[][]).map((cond) => {
-      const [left, op, right] = cond;
-      return `[${operandToString(left)}, "${operatorToString(op as string)}", ${operandToString(right)}]`;
-    });
-    parts.push(`conditions: [${conditions.join(", ")}]`);
-
-    // actions
-    const actions = policy.actions as string[];
-    parts.push(`actions: [${actions.map((a) => `"${a}"`).join(", ")}]`);
-
-    // permit (convert "allow"/"deny" back to boolean)
-    parts.push(`permit: ${policy.permit === "allow"}`);
-
-    // description (optional)
-    if (policy.description) {
-      parts.push(`description: "${policy.description.replace(/"/g, '\\"')}"`);
-    }
-
-    return `{ ${parts.join(", ")} }`;
-  });
-
-  return `.gqlPermission([${policies.join(", ")}])`;
-}
-
-/**
- * Generate TypeScript type definition for a plugin-generated TailorDB type.
- * Returns only the type definition (without imports or file headers) for embedding in schema files.
- * @param type - Parsed TailorDB type
- * @returns TypeScript type definition code
- */
-export function generatePluginTypeDefinition(type: ParsedTailorDBType): string {
-  // Generate field definitions, excluding 'id' since db.type() adds it automatically
-  const fieldEntries = Object.entries(type.fields)
-    .filter(([name]) => name !== "id")
-    .map(([name, field]) => `  ${name}: ${fieldConfigToDbCall(field.config)},`)
-    .join("\n");
-
-  // Check if we need to add timestamps
-  const hasCreatedAt = "createdAt" in type.fields;
-  const hasUpdatedAt = "updatedAt" in type.fields;
-  const hasTimestamps = hasCreatedAt && hasUpdatedAt;
-
-  // Filter out timestamp fields if they exist
-  const nonTimestampFields = Object.entries(type.fields)
-    .filter(([name]) => name !== "id" && name !== "createdAt" && name !== "updatedAt")
-    .map(([name, field]) => `  ${name}: ${fieldConfigToDbCall(field.config)},`)
-    .join("\n");
-
-  const fieldsContent = hasTimestamps
-    ? `${nonTimestampFields}\n  ...db.fields.timestamps(),`
-    : fieldEntries;
-
-  // Build type name (with optional plural form)
-  const typeName =
-    type.pluralForm && type.pluralForm !== type.name
-      ? `["${type.name}", "${type.pluralForm}"]`
-      : `"${type.name}"`;
-
-  // Build type definition with optional method chains
-  let result = `const ${type.name} = db.type(${typeName}, {\n${fieldsContent}\n})`;
-
-  // Add description if defined
-  if (type.description) {
-    result += `.description("${type.description.replace(/"/g, '\\"')}")`;
-  }
-
-  // Add files if defined
-  if (type.files && Object.keys(type.files).length > 0) {
-    const fileEntries = Object.entries(type.files)
-      .map(([key, desc]) => `${key}: "${desc.replace(/"/g, '\\"')}"`)
-      .join(", ");
-    result += `.files({ ${fileEntries} })`;
-  }
-
-  // Add features if defined (aggregation, bulkUpsert)
-  if (type.settings) {
-    const features: string[] = [];
-    if (type.settings.aggregation) {
-      features.push("aggregation: true");
-    }
-    if (type.settings.bulkUpsert) {
-      features.push("bulkUpsert: true");
-    }
-    if (features.length > 0) {
-      result += `.features({ ${features.join(", ")} })`;
-    }
-  }
-
-  // Add indexes if defined
-  if (type.indexes && Object.keys(type.indexes).length > 0) {
-    const indexDefs = Object.entries(type.indexes).map(([name, def]) => {
-      const parts: string[] = [];
-      parts.push(`fields: [${def.fields.map((f) => `"${f}"`).join(", ")}]`);
-      if (def.unique) {
-        parts.push(`unique: true`);
-      }
-      parts.push(`name: "${name}"`);
-      return `{ ${parts.join(", ")} }`;
-    });
-    result += `.indexes(${indexDefs.join(", ")})`;
-  }
-
-  // Add permission if defined
-  if (type.permissions.record) {
-    result += generatePermissionCall(type.permissions.record);
-  }
-
-  // Add gqlPermission if defined
-  if (type.permissions.gql && type.permissions.gql.length > 0) {
-    result += generateGqlPermissionCall(
-      type.permissions.gql as unknown as {
-        conditions: unknown[];
-        actions: unknown[];
-        permit: string;
-        description?: string;
-      }[],
-    );
-  }
-
-  return `${result};`;
 }
