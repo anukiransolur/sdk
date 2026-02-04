@@ -545,20 +545,21 @@ function operatorToString(op: string): string {
 }
 
 /**
- * Generate permission chain method call.
- * @param record - Standard record permissions
- * @param record.create
- * @param record.read
- * @param record.update
- * @param record.delete
- * @returns permission method call string
+ * Record permission configuration
  */
-function generatePermissionCall(record: {
+interface RecordPermissions {
   create?: readonly unknown[];
   read?: readonly unknown[];
   update?: readonly unknown[];
   delete?: readonly unknown[];
-}): string {
+}
+
+/**
+ * Generate permission chain method call.
+ * @param record - Standard record permissions with CRUD operations
+ * @returns permission method call string
+ */
+function generatePermissionCall(record: RecordPermissions): string {
   const actions: string[] = [];
 
   for (const action of ["create", "read", "update", "delete"] as const) {
