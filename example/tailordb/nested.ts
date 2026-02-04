@@ -23,7 +23,7 @@ export const nestedProfile = db
     archived: db.bool({ optional: true }).description("Archive status"),
     ownerID: db.uuid({ optional: true }).relation({
       type: "n-1",
-      toward: { type: user },
+      toward: { type: user, as: "owner" },
     }),
     ...db.fields.timestamps(),
   })

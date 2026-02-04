@@ -507,7 +507,7 @@ describe("dataplane", () => {
       ).__type.fields;
 
       // Verify nested object field types match (including relation and reverse relation fields)
-      const fieldsToCheck = ["userInfo", "metadata", "avatar", "ownerID", "user"];
+      const fieldsToCheck = ["userInfo", "metadata", "avatar", "ownerID", "owner"];
       for (const fieldName of fieldsToCheck) {
         const passThroughFieldType = getTypeName(
           passThroughFields.find((f) => f.name === fieldName),
