@@ -1,7 +1,7 @@
 entityDependencies:
   Customer: []
   Invoice: [SalesOrder]
-  NestedProfile: [User]
+  NestedProfile: []
   ProfileComment: [NestedProfile]
   ProfileDetail: [NestedProfile]
   PurchaseOrder: [Supplier]

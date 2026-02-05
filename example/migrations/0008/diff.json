@@ -1,7 +1,7 @@
 {
   "version": 1,
   "namespace": "tailordb",
-  "createdAt": "2026-02-04T23:31:39.129Z",
+  "createdAt": "2026-02-05T00:52:09.882Z",
   "changes": [
     {
       "kind": "type_added",
@@ -74,30 +74,6 @@
         "pluralForm": "ProfileDetails",
         "description": "Additional detail for a profile",
         "settings": {}
-      }
-    },
-    {
-      "kind": "field_added",
-      "typeName": "NestedProfile",
-      "fieldName": "ownerID",
-      "after": {
-        "type": "uuid",
-        "required": false,
-        "index": true,
-        "foreignKey": true,
-        "foreignKeyType": "User",
-        "foreignKeyField": "id"
-      }
-    },
-    {
-      "kind": "type_modified",
-      "typeName": "NestedProfile",
-      "reason": "File field \"avatar\" added",
-      "before": {},
-      "after": {
-        "files": {
-          "avatar": "profile avatar image"
-        }
       }
     }
   ],
