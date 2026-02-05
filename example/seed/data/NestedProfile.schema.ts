@@ -12,4 +12,9 @@ const hook = createTailorDBHook(nestedProfile);
 
 export const schema = defineSchema(
   createStandardSchema(schemaType, hook),
+  {
+    foreignKeys: [
+      {"column":"ownerID","references":{"table":"User","column":"id"}},
+    ],
+  }
 );

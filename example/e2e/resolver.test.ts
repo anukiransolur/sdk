@@ -510,6 +510,9 @@ describe("dataplane", () => {
       const fieldsToCheck = [
         "userInfo", // nested object
         "metadata", // nested object
+        "avatar", // file field
+        "ownerID", // n-1 relation (foreign key)
+        "owner", // n-1 relation (navigation property)
         "detail", // 1-1 backward relation (from ProfileDetail)
         "comments", // n-1 backward relation (from ProfileComment)
       ];
