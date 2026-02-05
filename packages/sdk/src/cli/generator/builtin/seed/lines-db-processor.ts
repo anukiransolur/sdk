@@ -174,7 +174,7 @@ export interface PluginTypeImport {
   originalExportName?: string;
   /** Original type's import path (for type-attached plugins) */
   originalImportPath?: string;
-  /** Generated type kind (for type-attached plugins, e.g., "request", "step") */
+  /** Generated type kind (e.g., "request", "step") */
   generatedTypeKind?: string;
 }
 

@@ -10,7 +10,7 @@ import {
   type TypeSourceInfo,
 } from "@/parser/service/tailordb";
 import type { TailorDBServiceConfig } from "@/configure/services/tailordb/types";
-import type { PluginAttachment, PluginGeneratedType } from "@/parser/plugin-config/types";
+import type { PluginAttachment } from "@/parser/plugin-config/types";
 import type { PluginManager } from "@/plugin/manager";
 
 export type TailorDBService = {
@@ -201,7 +201,7 @@ export function createTailorDBService(
       }
 
       // Add generated types to rawTypes
-      for (const generatedType of output.types ?? []) {
+      for (const [kind, generatedType] of Object.entries(output.types ?? {})) {
         rawTypes[sourceFilePath][generatedType.name] = generatedType as TailorDBType;
         // Plugin-generated types don't have a source file.
         // Generators that need to import these types should generate their own type files.
@@ -215,8 +215,8 @@ export function createTailorDBService(
           pluginImportPath: pluginManager?.getPluginImportPath(attachment.pluginId),
           originalFilePath: sourceFilePath,
           originalExportName: originalTypeInfo?.exportName ?? rawType.name,
-          // Get kind from plugin output (plugins define their own kind mapping)
-          generatedTypeKind: (generatedType as PluginGeneratedType).kind,
+          // Kind comes from the map key
+          generatedTypeKind: kind,
         };
 
         logger.log(
@@ -300,7 +300,7 @@ export function createTailorDBService(
         rawTypes[standaloneKey] = {};
       }
 
-      for (const generatedType of output.types ?? []) {
+      for (const [kind, generatedType] of Object.entries(output.types ?? {})) {
         rawTypes[standaloneKey][generatedType.name] = generatedType as TailorDBType;
         // Plugin-generated types don't have a source file.
         typeSourceInfo[generatedType.name] = {
@@ -311,8 +311,8 @@ export function createTailorDBService(
           pluginImportPath: pluginManager.getPluginImportPath(pluginId),
           originalFilePath: "",
           originalExportName: "",
-          // Get kind from plugin output (plugins define their own kind mapping)
-          generatedTypeKind: (generatedType as PluginGeneratedType).kind,
+          // Kind comes from the map key
+          generatedTypeKind: kind,
         };
 
         logger.log(
@@ -322,7 +322,9 @@ export function createTailorDBService(
     }
 
     // Re-parse types to include standalone plugin-generated types
-    if (results.some((r) => r.result.success && (r.result.output.types?.length ?? 0) > 0)) {
+    if (
+      results.some((r) => r.result.success && Object.keys(r.result.output.types ?? {}).length > 0)
+    ) {
       doParseTypes();
     }
   };
